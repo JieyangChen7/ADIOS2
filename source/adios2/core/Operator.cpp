@@ -11,6 +11,8 @@
 #include "Operator.h"
 #include "adios2/helper/adiosFunctions.h"
 
+#include <iostream>
+
 namespace adios2
 {
 namespace core
@@ -95,6 +97,22 @@ Dims Operator::ConvertDims(const Dims &dimensions, const DataType type, const si
 }
 
 size_t Operator::GetHeaderSize() const { return 0; }
+
+size_t Operator::GetEstimatedSize(const size_t ElemCount, const size_t ElemSize, const size_t ndims,
+                                  const size_t *dims) const
+{
+    return ElemCount * ElemSize + 128;
+};
+
+void Operator::PrintParameters()
+{
+    std::cout << "Operator " << m_TypeString << " parameters: \n";
+    for (auto &p : m_Parameters)
+    {
+        std::cout << "    " << p.first << " = " << p.second;
+    }
+    std::cout << "\n";
+}
 
 // PRIVATE
 void Operator::CheckCallbackType(const std::string type) const

@@ -175,6 +175,7 @@ size_t Decompress(const char *bufferIn, const size_t sizeIn, char *dataOut, Memo
     {
         op = MakeOperator(OperatorTypeToString(compressorType), {});
     }
+    op->PrintParameters();
     size_t sizeOut = op->InverseOperate(bufferIn, sizeIn, dataOut);
     if (sizeOut == 0) // the inverse operator was not applied
     {

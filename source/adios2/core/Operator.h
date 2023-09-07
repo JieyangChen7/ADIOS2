@@ -68,6 +68,10 @@ public:
 
     virtual size_t GetHeaderSize() const;
 
+    /** Give an upper bound estimate how big the transformed data could be */
+    virtual size_t GetEstimatedSize(const size_t ElemCount, const size_t ElemSize,
+                                    const size_t ndims, const size_t *dims) const;
+
     /**
      * @param dataIn
      * @param blockStart
@@ -89,6 +93,8 @@ public:
     virtual size_t InverseOperate(const char *bufferIn, const size_t sizeIn, char *dataOut) = 0;
 
     virtual bool IsDataTypeValid(const DataType type) const = 0;
+
+    void PrintParameters();
 
 protected:
     /** Parameters associated with a particular Operator */
