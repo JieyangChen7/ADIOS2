@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
 
         io.DefineAttribute<int>("nsteps", NSTEPS);
 
-        adios2::Operator op = adios.DefineOperator("mgard", "mgard");
+        adios2::Operator op = adios.DefineOperator("mdr", "mdr");
         varGlobalArray.AddOperation(op, {{"accuracy", std::to_string(0.1)}});
 
         // Open file. "w" means we overwrite any existing file on disk,

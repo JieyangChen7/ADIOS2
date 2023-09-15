@@ -20,7 +20,7 @@ namespace adios2
 {
 namespace core
 {
-namespace compress
+namespace refactor
 {
 
 class RefactorMDR : public Operator
@@ -68,7 +68,10 @@ private:
      * @param dataOut : decompressed data buffer
      * @return : number of bytes in dataOut
      */
-    size_t DecompressV1(const char *bufferIn, const size_t sizeIn, char *dataOut);
+    size_t ReconstructV1(const char *bufferIn, const size_t sizeIn, char *dataOut);
+    size_t SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &refactored_metadata,
+                                   mgard_x::MDR::RefactoredData &refactored_data, char *buffer,
+                                   size_t maxsize);
 
     std::string m_VersionInfo;
 
