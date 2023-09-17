@@ -14,6 +14,8 @@
 #include <assert.h>
 #include <cstring>
 
+#include <stdio.h>
+
 #include <mgard/compress_x.hpp>
 
 namespace adios2
@@ -27,7 +29,7 @@ RefactorMDR::RefactorMDR(const Params &parameters)
 : Operator("mdr", REFACTOR_MDR, "refactor", parameters)
 {
     config.normalize_coordinates = false;
-    config.log_level = 0;
+    config.log_level = 1;
     config.decomposition = mgard_x::decomposition_type::MultiDim;
     config.domain_decomposition = mgard_x::domain_decomposition_type::MaxDim;
     // config.domain_decomposition = mgard_x::domain_decomposition_type::Block;
@@ -193,6 +195,12 @@ size_t RefactorMDR::Operate(const char *dataIn, const Dims &blockStart, const Di
     return bufferOutOffset;
 }
 
+void writefile(const std::string output_file, const mgard_x::Byte *out_buff, const size_t num_bytes)
+{
+    FILE *file = fopen(output_file.c_str(), "w");
+    fwrite(out_buff, 1, num_bytes, file);
+    fclose(file);
+}
 // return number of bytes written
 size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &refactored_metadata,
                                             mgard_x::MDR::RefactoredData &refactored_data,
@@ -207,6 +215,7 @@ size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &re
         PutParameter<uint64_t>(buffer, offset, metadata_header_size);
         std::memcpy(buffer + offset, refactored_metadata.header.data(), metadata_header_size);
         offset += metadata_header_size;
+        writefile("mdr_write_header", refactored_metadata.header.data(), metadata_header_size);
     }
 
     /* Metadata */
@@ -214,8 +223,9 @@ size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &re
     const uint64_t metadata_size = (uint64_t)serialized_metadata.size();
     {
         PutParameter<uint64_t>(buffer, offset, metadata_size);
-        std::memcpy(buffer + offset, refactored_metadata.metadata.data(), metadata_size);
+        std::memcpy(buffer + offset, serialized_metadata.data(), metadata_size);
         offset += metadata_size;
+        writefile("mdr_write_metadata", serialized_metadata.data(), metadata_size);
     }
 
     std::cout << "MDR metadata seralized " << offset << " bytes. header = " << metadata_header_size
@@ -275,9 +285,15 @@ size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &re
                 offset +=
                     refactored_metadata.metadata[subdomain_id].level_sizes[level_idx][bitplane_idx];
                 ++nBlocks;
+                /*writefile(filename, refactored_data.data[subdomain_id][level_idx][bitplane_idx],
+                          refactored_metadata.metadata[subdomain_id]
+                              .level_sizes[level_idx][bitplane_idx]);*/
             }
         }
     }
+    writefile("mdr_write_table", reinterpret_cast<mgard_x::Byte *>(table),
+              tableSize * sizeof(uint64_t));
+
     std::cout << "MDR serialized " << offset << " bytes, MDR header size = " << MDRHeaderSize
               << " subdomains = " << (size_t)nSubdomains << " levels = " << (size_t)nLevels
               << " bitplanes = " << (size_t)nBitPlanes << " blocks = " << nBlocks << "\n";
@@ -294,8 +310,8 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
     // ReconstructV1 and keep this function for reconstructing legacy data.
 
     config.log_level = 3;
-    double tol = std::numeric_limits<double>::epsilon();
-    double s = 1.0;
+    double tol = 0.000001; // std::numeric_limits<double>::epsilon();
+    double s = std::numeric_limits<double>::infinity();
 
     size_t bufferInOffset = 0;
 
@@ -323,11 +339,6 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
 
     size_t sizeOut = helper::GetTotalSize(blockCount, helper::GetDataTypeSize(type));
 
-    if (type == DataType::FloatComplex || type == DataType::DoubleComplex)
-    {
-        sizeOut /= 2;
-    }
-
     mgard_x::MDR::RefactoredMetadata refactored_metadata;
 
     /* Metadata header */
@@ -337,6 +348,7 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
         std::memcpy(refactored_metadata.header.data(), bufferIn + bufferInOffset,
                     metadata_header_size);
         bufferInOffset += metadata_header_size;
+        writefile("mdr_read_header", refactored_metadata.header.data(), metadata_header_size);
     }
 
     /* Metadata */
@@ -346,6 +358,7 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
         serialized_metadata.resize(metadata_size);
         std::memcpy(serialized_metadata.data(), bufferIn + bufferInOffset, metadata_size);
         bufferInOffset += metadata_size;
+        writefile("mdr_read_metadata", serialized_metadata.data(), metadata_size);
         refactored_metadata.Deserialize(serialized_metadata);
         refactored_metadata.InitializeForReconstruction();
     }
@@ -360,6 +373,8 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
     const uint64_t tableSize = (nSubdomains * nLevels * nBitPlanes);
     const uint64_t *table = (uint64_t *)(bufferIn + bufferInOffset);
     bufferInOffset += tableSize * sizeof(uint64_t);
+    writefile("mdr_read_table", reinterpret_cast<const mgard_x::Byte *>(table),
+              tableSize * sizeof(uint64_t));
 
     /*
         Reconstruction
@@ -396,19 +411,20 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
                 int num_bitplanes = metadata.level_sizes[level_idx].size();
                 int loaded_bitplanes = metadata.loaded_level_num_bitplanes[level_idx];
                 int reqested_bitplanes = metadata.requested_level_num_bitplanes[level_idx];
+                assert(nBitPlanes >= metadata.requested_level_num_bitplanes[level_idx]);
                 for (int bitplane_idx = loaded_bitplanes; bitplane_idx < reqested_bitplanes;
                      bitplane_idx++)
                 {
-                    assert(nBitPlanes >= metadata.requested_level_num_bitplanes[level_idx]);
+
                     uint64_t componentSize = refactored_metadata.metadata[subdomain_id]
                                                  .level_sizes[level_idx][bitplane_idx];
                     const mgard_x::Byte *cdata =
                         reinterpret_cast<const mgard_x::Byte *>(componentData + table[tableIdx]);
 
-                    std::cout << "MDR use component subdomain = " << subdomain_id
+                    /*std::cout << "MDR use component subdomain = " << subdomain_id
                               << " level = " << level_idx << " bitplane = " << bitplane_idx
                               << " size = " << componentSize << " ptr = " << (void *)cdata
-                              << std::endl;
+                              << std::endl;*/
 
                     refactored_data.data[subdomain_id][level_idx][bitplane_idx] =
                         const_cast<mgard_x::Byte *>(cdata);
@@ -416,6 +432,9 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
                 if (first_reconstruction)
                 {
                     // initialize level signs
+                    std::cout << "mdr level signs for subdomain " << subdomain_id << " level "
+                              << level_idx << " num_elems = " << metadata.level_num_elems[level_idx]
+                              << std::endl;
                     refactored_data.level_signs[subdomain_id][level_idx] =
                         (bool *)malloc(sizeof(bool) * metadata.level_num_elems[level_idx]);
                     memset(refactored_data.level_signs[subdomain_id][level_idx], 0,
@@ -425,12 +444,32 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
         }
     }
 
+    /* Initialize reconstructed data manually here to force using
+        user allocated memory for the final result
+    */
+    if (false)
+    {
+        reconstructed_data.Initialize(1);
+        reconstructed_data.data[0] = reinterpret_cast<mgard_x::Byte *>(dataOut);
+        std::memset(reconstructed_data.data[0], 0, sizeOut);
+        std::vector<mgard_x::SIZE> offsets = std::vector<mgard_x::SIZE>(ndims, 0);
+        std::vector<mgard_x::SIZE> shape = std::vector<mgard_x::SIZE>();
+        for (const auto &c : blockCount)
+        {
+            shape.push_back(static_cast<mgard_x::SIZE>(c));
+        }
+        reconstructed_data.offset[0] = offsets;
+        reconstructed_data.shape[0] = shape;
+    }
+
     mgard_x::MDR::MDReconstruct(refactored_metadata, refactored_data, reconstructed_data, config,
                                 false);
 
-    first_reconstruction = false;
+    std::cout << "Copy " << sizeOut << " bytes from buffer " << (void *)reconstructed_data.data[0]
+              << " to user buffer " << (void *)dataOut << std::endl;
+    std::memcpy(dataOut, reconstructed_data.data[0], sizeOut);
 
-    int subdomain_id = 0;
+    first_reconstruction = false;
 
     for (int subdomain_id = 0; subdomain_id < reconstructed_data.data.size(); subdomain_id++)
     {
@@ -447,14 +486,9 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
         std::cout << ")\n";
     }
 
-    try
+    if (type == DataType::FloatComplex || type == DataType::DoubleComplex)
     {
-        void *dataOutVoid = dataOut;
-        mgard_x::decompress(bufferIn + bufferInOffset, sizeIn - bufferInOffset, dataOutVoid, true);
-    }
-    catch (...)
-    {
-        helper::Throw<std::runtime_error>("Operator", "RefactorMDR", "DecompressV1", m_VersionInfo);
+        sizeOut /= 2;
     }
     return sizeOut;
 }
