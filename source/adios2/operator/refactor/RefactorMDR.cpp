@@ -39,7 +39,7 @@ RefactorMDR::RefactorMDR(const Params &parameters)
     config.prefetch = false;
     // config.max_memory_footprint = max_memory_footprint;
 
-    config.lossless = mgard_x::lossless_type::Huffman_LZ4;
+    config.lossless = mgard_x::lossless_type::Huffman_Zstd;
     // mgard_x::lossless_type::Huffman, mgard_x::lossless_type::Huffman_Zstd,
     // mgard_x::lossless_type::CPU_Lossless
 
@@ -268,7 +268,7 @@ size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &re
         for (size_t level_idx = 0;
              level_idx < refactored_metadata.metadata[subdomain_id].level_sizes.size(); level_idx++)
         {
-            tableIdx = subdomain_id * nLevels * nBitPlanes;
+            tableIdx = subdomain_id * nLevels * nBitPlanes + level_idx * nBitPlanes;
             for (size_t bitplane_idx = 0;
                  bitplane_idx <
                  refactored_metadata.metadata[subdomain_id].level_sizes[level_idx].size();
@@ -281,13 +281,13 @@ size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &re
                             refactored_data.data[subdomain_id][level_idx][bitplane_idx],
                             refactored_metadata.metadata[subdomain_id]
                                 .level_sizes[level_idx][bitplane_idx]);
-                table[tableIdx++] = offset;
+                table[tableIdx++] = offset - MDRHeaderSize;
                 offset +=
                     refactored_metadata.metadata[subdomain_id].level_sizes[level_idx][bitplane_idx];
                 ++nBlocks;
-                /*writefile(filename, refactored_data.data[subdomain_id][level_idx][bitplane_idx],
+                writefile(filename, refactored_data.data[subdomain_id][level_idx][bitplane_idx],
                           refactored_metadata.metadata[subdomain_id]
-                              .level_sizes[level_idx][bitplane_idx]);*/
+                              .level_sizes[level_idx][bitplane_idx]);
             }
         }
     }
@@ -310,7 +310,7 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
     // ReconstructV1 and keep this function for reconstructing legacy data.
 
     config.log_level = 3;
-    double tol = 0.000001; // std::numeric_limits<double>::epsilon();
+    double tol = std::numeric_limits<double>::epsilon();
     double s = std::numeric_limits<double>::infinity();
 
     size_t bufferInOffset = 0;
@@ -407,7 +407,7 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
             for (int level_idx = 0; level_idx < num_levels; level_idx++)
             {
                 assert(nLevels >= metadata.level_sizes.size());
-                tableIdx = subdomain_id * nLevels * nBitPlanes;
+                tableIdx = subdomain_id * nLevels * nBitPlanes + level_idx * nBitPlanes;
                 int num_bitplanes = metadata.level_sizes[level_idx].size();
                 int loaded_bitplanes = metadata.loaded_level_num_bitplanes[level_idx];
                 int reqested_bitplanes = metadata.requested_level_num_bitplanes[level_idx];
@@ -428,6 +428,13 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
 
                     refactored_data.data[subdomain_id][level_idx][bitplane_idx] =
                         const_cast<mgard_x::Byte *>(cdata);
+
+                    std::string filename = "mdr_read_component_" + std::to_string(subdomain_id) +
+                                           "_" + std::to_string(level_idx) + "_" +
+                                           std::to_string(bitplane_idx);
+                    writefile(filename, refactored_data.data[subdomain_id][level_idx][bitplane_idx],
+                              refactored_metadata.metadata[subdomain_id]
+                                  .level_sizes[level_idx][bitplane_idx]);
                 }
                 if (first_reconstruction)
                 {
@@ -467,6 +474,13 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
 
     std::cout << "Copy " << sizeOut << " bytes from buffer " << (void *)reconstructed_data.data[0]
               << " to user buffer " << (void *)dataOut << std::endl;
+    std::cout << "Dump data: \n";
+    assert(sizeOut / sizeof(double) == reconstructed_data.shape[0][0]);
+    for (int i = 0; i < sizeOut / sizeof(double); ++i)
+    {
+        std::cout << ((double *)reconstructed_data.data[0])[i] << " ";
+    }
+    std::cout << "\n";
     std::memcpy(dataOut, reconstructed_data.data[0], sizeOut);
 
     first_reconstruction = false;
