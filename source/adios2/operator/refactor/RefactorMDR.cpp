@@ -97,6 +97,26 @@ struct RefactorMDRHeader
     uint8_t nBitPlanes;
 };
 
+size_t readfile(std::string input_file, mgard_x::Byte *&in_buff) {
+  // std::cout << mgard_x::log::log_info << "Loading file: " << input_file <<
+  // "\n";
+
+  FILE *pFile;
+  pFile = fopen(input_file.c_str(), "rb");
+  if (pFile == NULL) {
+    std::cout << mgard_x::log::log_err << "file open error!\n";
+    exit(1);
+  }
+  fseek(pFile, 0, SEEK_END);
+  size_t lSize = ftell(pFile);
+  rewind(pFile);
+  in_buff = (mgard_x::Byte *)malloc(lSize);
+  lSize = fread(in_buff, 1, lSize, pFile);
+  fclose(pFile);
+  // min_max(lSize/sizeof(T), in_buff);
+  return lSize;
+}
+
 size_t RefactorMDR::Operate(const char *dataIn, const Dims &blockStart, const Dims &blockCount,
                             const DataType type, char *bufferOut)
 {
@@ -274,7 +294,7 @@ size_t RefactorMDR::SerializeRefactoredData(mgard_x::MDR::RefactoredMetadata &re
                  refactored_metadata.metadata[subdomain_id].level_sizes[level_idx].size();
                  bitplane_idx++)
             {
-                std::string filename = "component_" + std::to_string(subdomain_id) + "_" +
+                std::string filename = "mdr_write_component_" + std::to_string(subdomain_id) + "_" +
                                        std::to_string(level_idx) + "_" +
                                        std::to_string(bitplane_idx);
                 std::memcpy(buffer + offset,
@@ -435,6 +455,14 @@ size_t RefactorMDR::ReconstructV1(const char *bufferIn, const size_t sizeIn, cha
                     writefile(filename, refactored_data.data[subdomain_id][level_idx][bitplane_idx],
                               refactored_metadata.metadata[subdomain_id]
                                   .level_sizes[level_idx][bitplane_idx]);
+
+                    { // Read from mdr_write_compoenents* instead from ADIOS buffer
+                        std::string filename = "mdr_write_component_" + std::to_string(subdomain_id) +
+                                   "_" + std::to_string(level_idx) + "_" +
+                                   std::to_string(bitplane_idx);
+                        mgard_x::SIZE level_size = readfile(filename,
+                            refactored_data.data[subdomain_id][level_idx][bitplane_idx]);
+                    }
                 }
                 if (first_reconstruction)
                 {
